@@ -10,6 +10,8 @@ from aiogram.types import ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButt
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import datetime, asyncio
 from aiogram.utils import executor
+import requests
+from bs4 import BeautifulSoup
 
 #https://t.me/aiogrampgadmin_bot
 
@@ -342,12 +344,34 @@ async def process_username_for_delete(message: types.Message, state: FSMContext)
     # Finish the form state for the delete command
     await state.finish()
 
+# Define the holidays manually
+holidays = [
+    datetime.date(2023, 1, 1),  # New Year's Day
+    datetime.date(2023, 3, 8),  # International Women's Day
+    datetime.date(2023, 3, 21), #Nauryz
+    datetime.date(2023, 3, 22), #Nauryz
+    datetime.date(2023, 3, 23), #Nauryz
+    datetime.date(2023, 5, 1),  # Labor Day
+    datetime.date(2023, 5, 7),  # Labor Day
+    datetime.date(2023, 5, 9),  # Victory Day
+    datetime.date(2023, 7, 6),  # Capital City Day
+    datetime.date(2023, 8, 30),  # Constitution Day
+    datetime.date(2023, 10, 25),  # epublicR
+    datetime.date(2023, 12, 16),  # Independence Day
+]
+
 @dp.message_handler(commands=['visit'])
 async def change_command_handler(message: types.Message):
+    today = datetime.date.today()
+    if today in holidays:
+        await message.reply("Today is a holiday in Kazakhstan, there are no training sessions.")
+    else:
+        await message.reply("Make sure your training session is today")
     await message.reply("Please enter the username of the profile:")
 
     # Set the state to get the user's username for the delete command
     await Form.visit.set()
+
 
 @dp.message_handler(state=Form.visit)
 async def change_username_handler(message: types.Message, state: FSMContext):
