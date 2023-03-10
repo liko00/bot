@@ -1,0 +1,32 @@
+@dp.message_handler(commands=['visit'])
+async def change_command_handler(message: types.Message):
+    await message.reply("Please enter the username of the profile:")
+
+    # Set the state to get the user's username for the delete command
+    await Form.visit.set()
+
+@dp.message_handler(state=Form.visit)
+async def change_username_handler(message: types.Message, state: FSMContext):
+    # Get the username entered by the user
+    username = message.text
+    try:
+        # Check if user exists in the database
+        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+        result = cursor.fetchone()
+
+        if result is not None:
+            # Subtract one from the visits column for the user
+            cursor.execute("UPDATE users SET visits = visits - 1 WHERE username = %s", (username,))
+
+            conn.commit()
+            await message.reply(f"The profile with username {username} has been updated.")
+        else:
+            # If the user doesn't exist in the database, send a message saying so
+            await message.reply("User not found.")
+    except:
+        # If an exception is raised, send an error message to the user
+        await message.reply("An error occurred while processing your request. Please try again later.")
+
+    # Finish the form state for the delete command
+    await state.finish()
+
