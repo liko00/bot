@@ -8,7 +8,8 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-
+import datetime, asyncio
+from aiogram.utils import executor
 
 #https://t.me/aiogrampgadmin_bot
 
@@ -25,21 +26,27 @@ bot = Bot(token="6006469701:AAG-KwjBr1lLXRbLCP_WivCKHznYTd_YWSw")
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
+async def send_message_to_user(bot: Bot, user_id: int, message: str):
+    await bot.send_message(user_id, message)
+
 class Form(StatesGroup):
     username = State()
     name = State()
     visits = State()
-    count =State()
+    count = State()
     days = State()
     num_days = State()
     time = State()
     info_username = State()
     delete_username = State()
-  
+    check = State()
+
+    def __init__(self):
+        self.times_selected = {}
 
 @dp.message_handler(commands=['start'])
 async def process_start_command(message: types.Message):
-    await message.reply("Hi\nPlease type /newprofile, /info, /deleteprofile or /reset", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True).add("/newprofile", "/deleteprofile", "/info", "/reset"))
+    await message.reply("Hi\nPlease type /newprofile, /info, /deleteprofile or /reset", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True).add("/newprofile", "/deleteprofile", "/info", "/reset", "/check"))
 
 @dp.message_handler(commands=['newprofile'])
 async def process_newprofile_command(message: types.Message):
@@ -113,7 +120,6 @@ async def process_num_days(message: types.Message, state: FSMContext):
     await state.update_data(num_days=num_days)
     await message.reply("Please select the days of the week:", reply_markup=days_keyboard)
     await Form.days.set()
- 
 
 @dp.message_handler(state=Form.days)
 async def process_days(message: types.Message, state: FSMContext):
@@ -127,13 +133,13 @@ async def process_days(message: types.Message, state: FSMContext):
         data["days"] = days
         num_days = data.get("num_days", 0)
         if len(days) >= num_days:
-            await state.update_data(days=selected_day)
-            await message.reply(f"You have selected {num_days} days: {', '.join(days)}")
+            # Store the selected days in the state
+            await state.update_data(days=days)
             await Form.time.set()
-            await message.reply("Please select the time you want to visit (hour):", reply_markup=keyboard)
+            # Ask the user to select a time for each day of the week
+            await message.reply("Please select the time for each day of the week:")
         else:
-            remaining_days = [day for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] if day not in days]
-            await message.reply(f"Select {num_days - len(days)} more days. Remaining days: {', '.join(remaining_days)}")
+            await message.reply(f"Please select {num_days - len(days)} more day(s) of the week:", reply_markup=days_keyboard)
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], state=Form.days)
 async def process_callback_days(callback_query: types.CallbackQuery, state: FSMContext):
@@ -164,8 +170,6 @@ async def process_callback_days(callback_query: types.CallbackQuery, state: FSMC
             days_keyboard.add(*remaining_days_buttons)
             await bot.answer_callback_query(callback_query.id)
             await bot.edit_message_text(f"Select {num_days - len(days)} more days. Remaining days:", callback_query.message.chat.id, callback_query.message.message_id, reply_markup=days_keyboard)
-         
-
 
 # Define the hours and minutes ranges
 HOURS_RANGE = range(0, 24)
@@ -178,29 +182,28 @@ keyboard = InlineKeyboardMarkup(row_width=6)
 hour_buttons = [InlineKeyboardButton(str(hour), callback_data=f"hour_{hour}") for hour in HOURS_RANGE]
 keyboard.add(*hour_buttons)
 
-# Add minute selection buttons
-#minute_buttons = [InlineKeyboardButton(str(minute), callback_data=f"minute_{minute}") for minute in MINUTES_RANGE]
-#keyboard.add(*minute_buttons)
-
 @dp.message_handler(state=Form.time)
-async def process_days(message: types.Message, state: FSMContext):
-    # Get the selected days of the week from the user's message text
-    selected_days = [
-        value for name, value in days_of_week
-        if name in message.text
-    ]
-    # Update the state with the selected days
-    await state.update_data(days=selected_days)
-    # Update the hour selection keyboard to only display hours from 0 to 23
-    keyboard = types.InlineKeyboardMarkup()
-    for hour in range(24):
-        keyboard.add(types.InlineKeyboardButton(text=f"{hour:02d}", callback_data=f"hour_{hour}"))
-    # Send the hour selection keyboard to the user
-    await message.reply("Please select the time you want to visit (hour):", reply_markup=keyboard)
-    # Set the next state to Form.time
-    await Form.time.set()
-
-
+async def process_times(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        times_selected = state.times_selected
+        days = data["days"]
+        selected_time = message.text
+        times_selected[selected_days] = selected_time
+        selected_days = [
+            value for name, value in days_of_week
+            if name in message.text
+        ]
+        if len(times_selected) == len(days):
+            # Store the selected times in the state
+            await state.update_data(times=times_selected)
+            # Display the summary to the user
+            summary = "\n".join([f"{day}: {times_selected[day]}" for day in days])
+            await message.reply(f"You have selected the following times:\n{summary}")
+            # Move to the next state or finish the conversation
+        else:
+            # Ask the user to select the time for the next day
+            next_day = [day for day in days if day not in times_selected][0]
+            await message.reply(f"Please select the time for {next_day}:")
 
 @dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('hour'), state=Form.time)
 async def process_hour(callback_query: types.CallbackQuery, state: FSMContext):
@@ -339,7 +342,63 @@ async def process_username_for_delete(message: types.Message, state: FSMContext)
     # Finish the form state for the delete command
     await state.finish()
 
+@dp.message_handler(commands=['check'])
+async def process_check_command(message: types.Message):
+    await message.reply("Please enter the username")
+
+    # Set the state to get the user's username for the delete command
+    await Form.check.set()
+     
+
+@dp.message_handler(state=Form.check)
+async def process_username_for_check(message: types.Message, state: FSMContext):
+    username = message.text
+
+    try:
+        # Get user data from database based on their username
+        cursor.execute("SELECT name, username, visits, days, time FROM users WHERE username = %s", (username,))
+        result = cursor.fetchone()
+
+        # Check if user exists in the database
+        if result is not None:
+            # Create a message with user info
+            name, username, visits, days, time = result
+            message_text = md.text(
+                md.text("Username:", md.bold(username),". Did you come today?"))
+            keyboardd = InlineKeyboardMarkup(row_width=2)
+            yes_button = InlineKeyboardButton('Yes', callback_data='yes')
+            no_button = InlineKeyboardButton('No', callback_data='no')
+            keyboardd.add(yes_button, no_button)
+            # Send the message to the user
+            await message.reply(message_text, reply_markup=keyboardd, parse_mode=ParseMode.MARKDOWN)
+        else:
+            # If the user doesn't exist in the database, send a message saying so
+            await message.reply("User not found.")
+    except:
+        # If an exception is raised, send an error message to the user
+        await message.reply("An error occurred while processing your request. Please try again later.")
+
+@dp.callback_query_handler(lambda c: c.data == 'yes', state=Form.check)
+async def process_yes_callback(callback_query: types.CallbackQuery, state: FSMContext):
+    username = callback_query.message.text.split(':')[1].strip()
+    try:
+        # Update visits column in the database for the specified username
+        cursor.execute("UPDATE users SET visits = visits - 1 WHERE username = %s", (username,))
+        conn.commit()
+        await callback_query.message.answer("Thank you for confirming your visit today!")
+    except:
+        # If an exception is raised, send an error message to the user
+        await callback_query.message.answer("An error occurred while processing your request. Please try again later.")
+    
+    # Finish the form state for the info command
+    await state.finish()
+
+@dp.callback_query_handler(lambda c: c.data == 'no', state=Form.check)
+async def process_yes_callback(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.answer("Your data is unchanged. Don't miss it next time!")
+    await state.finish()
+
 if __name__ == '__main__':
     from aiogram import executor
     executor.start_polling(dp)
-
+    
