@@ -370,7 +370,7 @@ async def process_username_for_check(message: types.Message, state: FSMContext):
             no_button = InlineKeyboardButton('No', callback_data='no')
             keyboardd.add(yes_button, no_button)
             # Send the message to the user
-            await message.reply(message_text, reply_markup=keyboardd, parse_mode=ParseMode.MARKDOWN)
+            await message.reply(message_text, reply_markup=keyboardd)
         else:
             # If the user doesn't exist in the database, send a message saying so
             await message.reply("User not found.")
