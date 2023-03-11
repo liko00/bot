@@ -30,3 +30,93 @@ async def change_username_handler(message: types.Message, state: FSMContext):
     # Finish the form state for the delete command
     await state.finish()
 
+
+
+# Define the hours and minutes ranges
+HOURS_RANGE = range(0, 24)
+MINUTES_RANGE = range(0, 60)
+
+# Create an inline keyboard markup for the hour and minute selection
+keyboard = InlineKeyboardMarkup(row_width=6)
+
+# Add hour selection buttons
+hour_buttons = [InlineKeyboardButton(str(hour), callback_data=f"hour_{hour}") for hour in HOURS_RANGE]
+keyboard.add(*hour_buttons)
+
+@dp.message_handler(state=Form.time)
+async def process_times(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        times_selected = state.times_selected
+        days = data["days"]
+        selected_time = message.text
+        times_selected[selected_days] = selected_time
+        selected_days = [
+            value for name, value in days_of_week
+            if name in message.text
+        ]
+        if len(times_selected) == len(days):
+            # Store the selected times in the state
+            await state.update_data(times=times_selected)
+            # Display the summary to the user
+            summary = "\n".join([f"{day}: {times_selected[day]}" for day in days])
+            await message.reply(f"You have selected the following times:\n{summary}")
+            # Move to the next state or finish the conversation
+        else:
+            # Ask the user to select the time for the next day
+            next_day = [day for day in days if day not in times_selected][0]
+            await message.reply(f"Please select the time for {next_day}:")
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('hour'), state=Form.time)
+async def process_hour(callback_query: types.CallbackQuery, state: FSMContext):
+    # Get the selected hour from the callback data
+    hour = int(callback_query.data.split("_")[1])
+    # Check that the hour value is within the valid range of 0 to 23
+    if hour < 0 or hour > 23:
+        await bot.answer_callback_query(callback_query.id, text="Invalid hour value. Please select a value between 0 and 23.")
+        return
+    # Update the state with the selected hour
+    data = await state.get_data()
+    data['hour'] = hour
+    await state.set_data(data)
+    # Create a new keyboard markup for selecting minutes
+    keyboard = types.InlineKeyboardMarkup()
+    # Add buttons for each possible minute value
+    for minute in range(0, 60, 10):
+        keyboard.add(types.InlineKeyboardButton(f"{minute:02d}", callback_data=f"minute_{minute}"))
+    # Edit the message to show the selected hour and the new keyboard for selecting minutes
+    await bot.edit_message_text(f"You selected {hour:02d}:00. Please select the minute:", callback_query.message.chat.id, callback_query.message.message_id, reply_markup=keyboard)
+
+
+@dp.callback_query_handler(lambda callback_query: callback_query.data.startswith('minute'), state=Form.time)
+async def process_minute(callback_query: types.CallbackQuery, state: FSMContext):
+    # Get the selected minute from the callback data
+    minute = int(callback_query.data.split("_")[1])
+    # Update the state with the selected minute
+    data = await state.get_data()
+    data['minute'] = minute
+    await state.set_data(data)
+    # Edit the message to show the selected hour and minute
+    data = await state.get_data()
+    hour = data['hour']
+    await bot.edit_message_text(f"You selected {hour:02d}:{minute:02d}.", callback_query.message.chat.id, callback_query.message.message_id)
+    # Save the user data to the database
+    user_data = await state.get_data()
+    name = user_data['name']
+    username = user_data['username']
+    visits = user_data['visits']
+    days = user_data['days']
+    time = f"{hour:02d}:{minute:02d}"
+    try:
+        cursor.execute("INSERT INTO users (name, username, visits, days, time) VALUES (%s, %s, %s, %s, %s)", (name, username, visits, days, time))
+        conn.commit()
+        await bot.send_message(callback_query.message.chat.id, f"User data for {username} has been successfully saved.")
+    except Exception as e:
+        conn.rollback()
+        await bot.send_message(callback_query.message.chat.id, "An error occurred while processing your request. Please try again later.")
+        print(f"Error: {e}")
+    # Finish the state machine
+    await state.finish()
+
+
+
